@@ -1,10 +1,30 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using OllamaSharp;
 
-var endpoint = new Uri("http://localhost:11434");
-var modelName = "gpt-oss:20b";
+var configuration = new ConfigurationBuilder()
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: false)
+    .AddJsonFile("appsettings.Local.json", optional: true)
+    .Build();
 
+var endpointValue = configuration["Ollama:Endpoint"];
+var modelName = configuration["Ollama:ModelName"];
+
+if (string.IsNullOrWhiteSpace(endpointValue))
+{
+    Console.Error.WriteLine("Ollama:Endpoint is not configured.");
+    return;
+}
+
+if (string.IsNullOrWhiteSpace(modelName))
+{
+    Console.Error.WriteLine("Ollama:ModelName is not configured.");
+    return;
+}
+
+var endpoint = new Uri(endpointValue);
 IChatClient chatClient = new OllamaApiClient(endpoint, modelName);
 
 AIAgent agent = chatClient.AsAIAgent(
