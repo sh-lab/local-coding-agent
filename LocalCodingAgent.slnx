@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LocalCodingAgent.App/LocalCodingAgent.App.csproj" />
+  </Folder>
+</Solution>
