@@ -11,7 +11,21 @@ AIAgent agent = chatClient.AsAIAgent(
     name: "LocalCodingAgent",
     instructions: "You are a concise local coding assistant. Answer clearly and briefly.");
 
-var prompt = "C#でリストを逆順にする最も簡単な方法を1つ教えてください。";
-var response = await agent.RunAsync(prompt);
+var prompt = args.Length > 0
+    ? string.Join(" ", args)
+    : ReadPrompt();
 
+if (string.IsNullOrWhiteSpace(prompt))
+{
+    Console.Error.WriteLine("Prompt is required.");
+    return;
+}
+
+var response = await agent.RunAsync(prompt);
 Console.WriteLine(response);
+
+static string? ReadPrompt()
+{
+    Console.Write("Prompt> ");
+    return Console.ReadLine();
+}
