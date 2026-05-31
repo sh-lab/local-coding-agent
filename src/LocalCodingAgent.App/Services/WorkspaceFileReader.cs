@@ -13,38 +13,32 @@ public sealed class WorkspaceFileReader
 
     public WorkspaceFileReader(
         string workspaceRoot,
-        IEnumerable<string> allowedExtensions,
-        int maxLines = 300,
-        int maxCharacters = 12_000,
-        long maxBytes = 256 * 1024)
+        WorkspaceFileReaderOptions options)
     {
         if (string.IsNullOrWhiteSpace(workspaceRoot))
         {
             throw new ArgumentException("Workspace root is required.", nameof(workspaceRoot));
         }
 
-        if (allowedExtensions is null)
-        {
-            throw new ArgumentNullException(nameof(allowedExtensions));
-        }
+        ArgumentNullException.ThrowIfNull(options);
 
         _workspaceRoot = Path.GetFullPath(workspaceRoot);
-        _maxLines = maxLines;
-        _maxCharacters = maxCharacters;
-        _maxBytes = maxBytes;
+        _maxLines = options.MaxLines;
+        _maxCharacters = options.MaxCharacters;
+        _maxBytes = options.MaxBytes;
         _pathComparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
         _allowedExtensions = new HashSet<string>(
-            allowedExtensions
+            (options.AllowedExtensions ?? Array.Empty<string>())
                 .Where(x => !string.IsNullOrWhiteSpace(x))
                 .Select(NormalizeExtension),
             StringComparer.OrdinalIgnoreCase);
 
         if (_allowedExtensions.Count == 0)
         {
-            throw new ArgumentException("At least one allowed extension is required.", nameof(allowedExtensions));
+            throw new ArgumentException("At least one allowed extension is required.", nameof(options));
         }
     }
 

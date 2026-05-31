@@ -10,18 +10,14 @@ var configuration = new ConfigurationBuilder()
     .AddJsonFile("appsettings.Local.json", optional: true)
     .Build();
 
-var allowedExtensions = configuration
-.GetSection("WorkspaceFileReader:AllowedExtensions")
-.GetChildren()
-.Select(x => x.Value)
-.Where(x => !string.IsNullOrWhiteSpace(x))
-.Cast<string>()
-.ToArray();
+var fileReaderOptions =
+    configuration.GetSection("WorkspaceFileReader").Get<WorkspaceFileReaderOptions>()
+    ?? throw new InvalidOperationException("WorkspaceFileReader settings are missing.");
 
 if (args.Length >= 2 && string.Equals(args[0], "read-file", StringComparison.OrdinalIgnoreCase))
 {
     var workspaceRoot = Directory.GetCurrentDirectory();
-    var reader = new WorkspaceFileReader(workspaceRoot, allowedExtensions);
+    var reader = new WorkspaceFileReader(workspaceRoot, fileReaderOptions);
     var result = reader.Read(args[1]);
 
     if (!result.Success)
