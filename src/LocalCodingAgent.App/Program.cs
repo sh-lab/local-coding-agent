@@ -14,11 +14,23 @@ var fileReaderOptions =
     configuration.GetSection("WorkspaceFileReader").Get<WorkspaceFileReaderOptions>()
     ?? throw new InvalidOperationException("WorkspaceFileReader settings are missing.");
 
+var fileListingOptions =
+    configuration.GetSection("WorkspaceFileListing").Get<WorkspaceFileListingOptions>()
+    ?? throw new InvalidOperationException("WorkspaceFileListing settings are missing.");
+
+var workspaceRoot = Directory.GetCurrentDirectory();
+var workspaceFileReader = new WorkspaceFileReader(workspaceRoot, fileReaderOptions);
+var workspaceFileLister = new WorkspaceFileLister(
+    workspaceRoot,
+    fileReaderOptions.AllowedExtensions,
+    fileListingOptions);
+
+var readFileTool = new ReadFileTool(workspaceFileReader);
+var listFilesTool = new ListFilesTool(workspaceFileLister);
+
 if (args.Length >= 2 && string.Equals(args[0], "read-file", StringComparison.OrdinalIgnoreCase))
 {
-    var workspaceRoot = Directory.GetCurrentDirectory();
-    var reader = new WorkspaceFileReader(workspaceRoot, fileReaderOptions);
-    var result = reader.Read(args[1]);
+    var result = workspaceFileReader.Read(args[1]);
 
     if (!result.Success)
     {
@@ -34,6 +46,30 @@ if (args.Length >= 2 && string.Equals(args[0], "read-file", StringComparison.Ord
         Console.WriteLine(
             $"[truncated] returned {result.ReturnedLines}/{result.TotalLines} lines, " +
             $"{result.ReturnedCharacters}/{result.TotalCharacters} characters.");
+    }
+
+    return;
+}
+
+if (args.Length >= 2 && string.Equals(args[0], "list-files", StringComparison.OrdinalIgnoreCase))
+{
+    var result = workspaceFileLister.ListFiles(args[1]);
+
+    if (!result.Success)
+    {
+        Console.Error.WriteLine($"Error: {result.ErrorMessage}");
+        return;
+    }
+
+    foreach (var file in result.Files)
+    {
+        Console.WriteLine(file);
+    }
+
+    if (result.Truncated)
+    {
+        Console.WriteLine();
+        Console.WriteLine($"[truncated] returned {result.ReturnedFiles}/{result.TotalFiles} files.");
     }
 
     return;
@@ -59,7 +95,16 @@ IChatClient chatClient = new OllamaApiClient(endpoint, modelName);
 
 AIAgent agent = chatClient.AsAIAgent(
     name: "LocalCodingAgent",
-    instructions: "You are a concise local coding assistant. Answer clearly and briefly.");
+    instructions:
+        "You are a concise local coding assistant. " +
+        "If you do not know which file to inspect, use the list-files tool first. " +
+        "If you need file content, use the read-file tool. " +
+        "Only use tools with relative paths inside the workspace.",
+    tools:
+    [
+        AIFunctionFactory.Create(listFilesTool.ListFiles),
+        AIFunctionFactory.Create(readFileTool.ReadFile)
+    ]);
 
 var prompt = args.Length > 0
     ? string.Join(" ", args)
