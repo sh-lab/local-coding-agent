@@ -18,12 +18,18 @@ var fileListingOptions =
     configuration.GetSection("WorkspaceFileListing").Get<WorkspaceFileListingOptions>()
     ?? throw new InvalidOperationException("WorkspaceFileListing settings are missing.");
 
+var artifactStoreOptions =
+    configuration.GetSection("AiArtifactStore").Get<AiArtifactStoreOptions>()
+    ?? throw new InvalidOperationException("AiArtifactStore settings are missing.");
+
 var workspaceRoot = Directory.GetCurrentDirectory();
 var workspaceFileReader = new WorkspaceFileReader(workspaceRoot, fileReaderOptions);
 var workspaceFileLister = new WorkspaceFileLister(
     workspaceRoot,
     fileReaderOptions.AllowedExtensions,
     fileListingOptions);
+
+var aiArtifactStore = new AiArtifactStore(workspaceRoot, artifactStoreOptions);
 
 var readFileTool = new ReadFileTool(workspaceFileReader);
 var listFilesTool = new ListFilesTool(workspaceFileLister);
@@ -72,6 +78,19 @@ if (args.Length >= 2 && string.Equals(args[0], "list-files", StringComparison.Or
         Console.WriteLine($"[truncated] returned {result.ReturnedFiles}/{result.TotalFiles} files.");
     }
 
+    return;
+}
+
+if (args.Length >= 2 && string.Equals(args[0], "summary-path", StringComparison.OrdinalIgnoreCase))
+{
+    Console.WriteLine(aiArtifactStore.GetSummaryPath(args[1]));
+    return;
+}
+
+if (args.Length >= 2 && string.Equals(args[0], "summary-status", StringComparison.OrdinalIgnoreCase))
+{
+    var isCurrent = await aiArtifactStore.IsSummaryCurrentAsync(args[1]);
+    Console.WriteLine(isCurrent ? "Current" : "MissingOrStale");
     return;
 }
 
