@@ -57,3 +57,5 @@ TestResult.xml
 nunit-*.xml
 
 appsettings.Local.json
+
+.ai-work/

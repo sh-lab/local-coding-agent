@@ -112,6 +112,27 @@ if (string.IsNullOrWhiteSpace(modelName))
 var endpoint = new Uri(endpointValue);
 IChatClient chatClient = new OllamaApiClient(endpoint, modelName);
 
+if (args.Length >= 2 && string.Equals(args[0], "summarize-file", StringComparison.OrdinalIgnoreCase))
+{
+    AIAgent summarizerAgent = chatClient.AsAIAgent(
+        name: "FileSummarizer",
+        instructions:
+            "You create concise, factual Japanese summaries of source and configuration files " +
+            "for a coding agent. Do not invent anything. Summarize only what is present.");
+
+    var summaryService = new FileSummaryService(
+        workspaceFileReader,
+        aiArtifactStore,
+        summarizerAgent);
+
+    var record = await summaryService.GetOrCreateSummaryAsync(args[1]);
+
+    Console.WriteLine(record.SummaryText);
+    Console.WriteLine();
+    Console.WriteLine($"Saved: {aiArtifactStore.GetSummaryPath(args[1])}");
+    return;
+}
+
 AIAgent agent = chatClient.AsAIAgent(
     name: "LocalCodingAgent",
     instructions:
