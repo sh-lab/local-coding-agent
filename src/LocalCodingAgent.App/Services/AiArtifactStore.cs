@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 namespace LocalCodingAgent.App.Services;
@@ -14,6 +13,7 @@ public sealed class AiArtifactStore
     private readonly string _workspaceRoot;
     private readonly string _artifactRoot;
     private readonly string _summariesRoot;
+    private readonly string _plansRoot;
     private readonly StringComparison _pathComparison;
 
     public AiArtifactStore(string workspaceRoot, AiArtifactStoreOptions options)
@@ -38,10 +38,17 @@ public sealed class AiArtifactStore
             ? "summaries"
             : options.SummariesDirectory.Trim();
 
+        var plansDirectory = string.IsNullOrWhiteSpace(options.PlansDirectory)
+            ? "plans"
+            : options.PlansDirectory.Trim();
+
         _artifactRoot = Path.GetFullPath(Path.Combine(_workspaceRoot, rootDirectory));
         _summariesRoot = Path.GetFullPath(Path.Combine(_artifactRoot, summariesDirectory));
+        _plansRoot = Path.GetFullPath(Path.Combine(_artifactRoot, plansDirectory));
 
-        if (!IsUnderWorkspace(_artifactRoot) || !IsUnderWorkspace(_summariesRoot))
+        if (!IsUnderWorkspace(_artifactRoot) ||
+            !IsUnderWorkspace(_summariesRoot) ||
+            !IsUnderWorkspace(_plansRoot))
         {
             throw new InvalidOperationException("Artifact directories must stay inside the workspace.");
         }
@@ -50,6 +57,7 @@ public sealed class AiArtifactStore
     public string WorkspaceRoot => _workspaceRoot;
     public string ArtifactRoot => _artifactRoot;
     public string SummariesRoot => _summariesRoot;
+    public string PlansRoot => _plansRoot;
 
     public string GetSummaryPath(string sourceRelativePath)
     {
@@ -133,6 +141,30 @@ public sealed class AiArtifactStore
         };
     }
 
+    public async Task<string> SavePlanAsync(
+        string instruction,
+        string planMarkdown,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(planMarkdown))
+        {
+            throw new ArgumentException("Plan content is required.", nameof(planMarkdown));
+        }
+
+        Directory.CreateDirectory(_plansRoot);
+
+        var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
+        var slug = ToSafeSlug(instruction);
+        var fileName = string.IsNullOrWhiteSpace(slug)
+            ? $"{timestamp}.plan.md"
+            : $"{timestamp}-{slug}.plan.md";
+
+        var fullPath = Path.Combine(_plansRoot, fileName);
+        await File.WriteAllTextAsync(fullPath, planMarkdown, cancellationToken);
+
+        return fullPath;
+    }
+
     private (DateTime LastWriteTimeUtc, long Length, string Hash) GetSourceMetadata(string sourceRelativePath)
     {
         var normalizedRelativePath = NormalizeSourceRelativePath(sourceRelativePath);
@@ -209,5 +241,28 @@ public sealed class AiArtifactStore
         using var sha256 = SHA256.Create();
         var hash = sha256.ComputeHash(stream);
         return Convert.ToHexString(hash);
+    }
+
+    private static string ToSafeSlug(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var chars = text
+            .Trim()
+            .ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '-')
+            .ToArray();
+
+        var slug = new string(chars);
+
+        while (slug.Contains("--", StringComparison.Ordinal))
+        {
+            slug = slug.Replace("--", "-", StringComparison.Ordinal);
+        }
+
+        return slug.Trim('-');
     }
 }

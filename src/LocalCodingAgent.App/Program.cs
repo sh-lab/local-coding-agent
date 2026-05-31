@@ -96,6 +96,7 @@ if (args.Length >= 2 && string.Equals(args[0], "summary-status", StringCompariso
 
 var endpointValue = configuration["Ollama:Endpoint"];
 var modelName = configuration["Ollama:ModelName"];
+var timeoutSecondsValue = configuration["Ollama:RequestTimeoutSeconds"];
 
 if (string.IsNullOrWhiteSpace(endpointValue))
 {
@@ -109,8 +110,19 @@ if (string.IsNullOrWhiteSpace(modelName))
     return;
 }
 
+var timeoutSeconds = int.TryParse(timeoutSecondsValue, out var parsedTimeoutSeconds)
+    ? parsedTimeoutSeconds
+    : 600;
+
 var endpoint = new Uri(endpointValue);
-IChatClient chatClient = new OllamaApiClient(endpoint, modelName);
+
+var ollamaHttpClient = new HttpClient
+{
+    BaseAddress = endpoint,
+    Timeout = TimeSpan.FromSeconds(timeoutSeconds)
+};
+
+IChatClient chatClient = new OllamaApiClient(ollamaHttpClient, modelName);
 
 if (args.Length >= 2 && string.Equals(args[0], "summarize-file", StringComparison.OrdinalIgnoreCase))
 {
@@ -213,6 +225,32 @@ if (args.Length >= 2 && string.Equals(args[0], "read-summary", StringComparison.
     return;
 }
 
+if (args.Length >= 2 && string.Equals(args[0], "create-plan", StringComparison.OrdinalIgnoreCase))
+{
+    var (directoryPath, instruction) = ParseCreatePlanArguments(args);
+
+    AIAgent summarizerAgent = CreateSummarizerAgent(chatClient);
+    AIAgent plannerAgent = CreatePlannerAgent(chatClient);
+
+    var summaryService = new FileSummaryService(
+        workspaceFileReader,
+        aiArtifactStore,
+        summarizerAgent);
+
+    var planService = new PlanService(
+        workspaceFileLister,
+        summaryService,
+        aiArtifactStore,
+        plannerAgent);
+
+    var result = await planService.CreatePlanAsync(instruction, directoryPath);
+
+    Console.WriteLine(result.PlanText);
+    Console.WriteLine();
+    Console.WriteLine($"Saved: {result.SavedPath}");
+    return;
+}
+
 AIAgent agent = chatClient.AsAIAgent(
     name: "LocalCodingAgent",
     instructions:
@@ -246,6 +284,26 @@ static AIAgent CreateSummarizerAgent(IChatClient chatClient)
         instructions:
             "You create concise, factual Japanese summaries of source and configuration files " +
             "for a coding agent. Do not invent anything. Summarize only what is present.");
+}
+
+static AIAgent CreatePlannerAgent(IChatClient chatClient)
+{
+    return chatClient.AsAIAgent(
+        name: "Planner",
+        instructions:
+            "You create Japanese work plans for a coding agent. " +
+            "You do not execute anything. " +
+            "You produce a proposal that will be shown to the user for approval.");
+}
+
+static (string DirectoryPath, string Instruction) ParseCreatePlanArguments(string[] args)
+{
+    if (args.Length >= 4 && string.Equals(args[1], "--dir", StringComparison.OrdinalIgnoreCase))
+    {
+        return (args[2], string.Join(" ", args.Skip(3)));
+    }
+
+    return (".", string.Join(" ", args.Skip(1)));
 }
 
 static async Task<string> GetSummaryStatusAsync(AiArtifactStore store, string sourcePath)
