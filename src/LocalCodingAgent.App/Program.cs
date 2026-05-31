@@ -89,8 +89,8 @@ if (args.Length >= 2 && string.Equals(args[0], "summary-path", StringComparison.
 
 if (args.Length >= 2 && string.Equals(args[0], "summary-status", StringComparison.OrdinalIgnoreCase))
 {
-    var isCurrent = await aiArtifactStore.IsSummaryCurrentAsync(args[1]);
-    Console.WriteLine(isCurrent ? "Current" : "MissingOrStale");
+    var status = await GetSummaryStatusAsync(aiArtifactStore, args[1]);
+    Console.WriteLine(status);
     return;
 }
 
@@ -114,11 +114,7 @@ IChatClient chatClient = new OllamaApiClient(endpoint, modelName);
 
 if (args.Length >= 2 && string.Equals(args[0], "summarize-file", StringComparison.OrdinalIgnoreCase))
 {
-    AIAgent summarizerAgent = chatClient.AsAIAgent(
-        name: "FileSummarizer",
-        instructions:
-            "You create concise, factual Japanese summaries of source and configuration files " +
-            "for a coding agent. Do not invent anything. Summarize only what is present.");
+    AIAgent summarizerAgent = CreateSummarizerAgent(chatClient);
 
     var summaryService = new FileSummaryService(
         workspaceFileReader,
@@ -130,6 +126,90 @@ if (args.Length >= 2 && string.Equals(args[0], "summarize-file", StringCompariso
     Console.WriteLine(record.SummaryText);
     Console.WriteLine();
     Console.WriteLine($"Saved: {aiArtifactStore.GetSummaryPath(args[1])}");
+    return;
+}
+
+if (args.Length >= 1 && string.Equals(args[0], "summarize-all", StringComparison.OrdinalIgnoreCase))
+{
+    AIAgent summarizerAgent = CreateSummarizerAgent(chatClient);
+
+    var summaryService = new FileSummaryService(
+        workspaceFileReader,
+        aiArtifactStore,
+        summarizerAgent);
+
+    var directoryPath =
+        args.Length >= 3 && string.Equals(args[1], "--dir", StringComparison.OrdinalIgnoreCase)
+            ? args[2]
+            : ".";
+
+    var listResult = workspaceFileLister.ListFiles(directoryPath);
+
+    if (!listResult.Success)
+    {
+        Console.Error.WriteLine($"Error: {listResult.ErrorMessage}");
+        return;
+    }
+
+    var generated = 0;
+    var current = 0;
+    var failed = 0;
+
+    foreach (var file in listResult.Files)
+    {
+        try
+        {
+            var wasCurrent = await aiArtifactStore.IsSummaryCurrentAsync(file);
+            _ = await summaryService.GetOrCreateSummaryAsync(file);
+
+            if (wasCurrent)
+            {
+                current++;
+                Console.WriteLine($"[current] {file}");
+            }
+            else
+            {
+                generated++;
+                Console.WriteLine($"[generated] {file}");
+            }
+        }
+        catch (Exception ex)
+        {
+            failed++;
+            Console.WriteLine($"[failed] {file} :: {ex.Message}");
+        }
+    }
+
+    Console.WriteLine();
+    Console.WriteLine(
+        $"Done. generated={generated}, current={current}, failed={failed}, total={listResult.ReturnedFiles}");
+
+    if (listResult.Truncated)
+    {
+        Console.WriteLine($"[truncated] returned {listResult.ReturnedFiles}/{listResult.TotalFiles} files.");
+    }
+
+    return;
+}
+
+if (args.Length >= 2 && string.Equals(args[0], "read-summary", StringComparison.OrdinalIgnoreCase))
+{
+    var record = await aiArtifactStore.TryLoadSummaryAsync(args[1]);
+    if (record is null)
+    {
+        Console.Error.WriteLine("Error: summary file does not exist.");
+        return;
+    }
+
+    var status = await GetSummaryStatusAsync(aiArtifactStore, args[1]);
+
+    Console.WriteLine($"SourcePath: {record.SourcePath}");
+    Console.WriteLine($"GeneratedAtUtc: {record.GeneratedAtUtc:O}");
+    Console.WriteLine($"SourceLastWriteTimeUtc: {record.SourceLastWriteTimeUtc:O}");
+    Console.WriteLine($"SourceLength: {record.SourceLength}");
+    Console.WriteLine($"Status: {status}");
+    Console.WriteLine();
+    Console.WriteLine(record.SummaryText);
     return;
 }
 
@@ -158,6 +238,27 @@ if (string.IsNullOrWhiteSpace(prompt))
 
 var response = await agent.RunAsync(prompt);
 Console.WriteLine(response);
+
+static AIAgent CreateSummarizerAgent(IChatClient chatClient)
+{
+    return chatClient.AsAIAgent(
+        name: "FileSummarizer",
+        instructions:
+            "You create concise, factual Japanese summaries of source and configuration files " +
+            "for a coding agent. Do not invent anything. Summarize only what is present.");
+}
+
+static async Task<string> GetSummaryStatusAsync(AiArtifactStore store, string sourcePath)
+{
+    var record = await store.TryLoadSummaryAsync(sourcePath);
+    if (record is null)
+    {
+        return "Missing";
+    }
+
+    var isCurrent = await store.IsSummaryCurrentAsync(sourcePath);
+    return isCurrent ? "Current" : "Stale";
+}
 
 static string? ReadPrompt()
 {
