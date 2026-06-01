@@ -333,7 +333,7 @@ if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.
         aiArtifactStore.OutputRoot,
         fileReaderOptions.AllowedExtensions);
 
-        var copilotInstructions = await copilotInstructionsProvider.TryLoadAsync();
+    var copilotInstructions = await copilotInstructionsProvider.TryLoadAsync();
 
     var generationService = new PlanOutputGenerationService(
         executionService,
@@ -344,11 +344,14 @@ if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.
         copilotInstructions);
 
     var result = await generationService.ExecuteToOutputAsync();
+    var completed = await aiArtifactStore.CompleteCurrentInProgressPlanAsync();
 
     Console.WriteLine();
     Console.WriteLine($"PlanId: {result.Preview.PlanId}");
     Console.WriteLine($"OutputRoot: {outputStore.GetPlanOutputRoot(result.Preview.PlanId)}");
     Console.WriteLine($"Manifest: {result.ManifestPath}");
+    Console.WriteLine($"CompletedTo: {completed.PlanDirectory}");
+    Console.WriteLine($"CompletedPlanFile: {completed.PlanPath}");
     return;
 }
 

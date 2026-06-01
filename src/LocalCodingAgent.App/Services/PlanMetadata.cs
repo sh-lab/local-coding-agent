@@ -7,4 +7,5 @@ public sealed class PlanMetadata
     public string Status { get; set; } = "pending";
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
 }

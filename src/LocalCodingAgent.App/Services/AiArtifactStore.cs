@@ -268,6 +268,65 @@ public sealed class AiArtifactStore
             Path.Combine(destinationPlanDirectory, "plan.md"));
     }
 
+    public async Task<(string PlanId, string PlanDirectory, string PlanPath)> CompleteCurrentInProgressPlanAsync(
+    CancellationToken cancellationToken = default)
+    {
+        Directory.CreateDirectory(_inProgressPlansRoot);
+        Directory.CreateDirectory(_completedPlansRoot);
+
+        var existingInProgressPlans = Directory.EnumerateDirectories(_inProgressPlansRoot).ToArray();
+
+        if (existingInProgressPlans.Length == 0)
+        {
+            throw new InvalidOperationException("No in-progress plan exists.");
+        }
+
+        if (existingInProgressPlans.Length > 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected exactly one in-progress plan, but found {existingInProgressPlans.Length}.");
+        }
+
+        var sourcePlanDirectory = existingInProgressPlans[0];
+        var sourcePlanPath = Path.Combine(sourcePlanDirectory, "plan.md");
+        var sourceMetadataPath = Path.Combine(sourcePlanDirectory, "meta.json");
+
+        if (!File.Exists(sourcePlanPath))
+        {
+            throw new FileNotFoundException("plan.md was not found.", sourcePlanPath);
+        }
+
+        if (!File.Exists(sourceMetadataPath))
+        {
+            throw new FileNotFoundException("meta.json was not found.", sourceMetadataPath);
+        }
+
+        var metadata = await LoadPlanMetadataAsync(sourceMetadataPath, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to load plan metadata.");
+
+        metadata.Status = "completed";
+        metadata.CompletedAtUtc = DateTime.UtcNow;
+
+        await using (var stream = File.Create(sourceMetadataPath))
+        {
+            await JsonSerializer.SerializeAsync(stream, metadata, JsonOptions, cancellationToken);
+        }
+
+        var destinationPlanDirectory = Path.Combine(_completedPlansRoot, metadata.PlanId);
+
+        if (Directory.Exists(destinationPlanDirectory))
+        {
+            throw new InvalidOperationException("The destination completed plan directory already exists.");
+        }
+
+        Directory.Move(sourcePlanDirectory, destinationPlanDirectory);
+
+        return (
+            metadata.PlanId,
+            destinationPlanDirectory,
+            Path.Combine(destinationPlanDirectory, "plan.md"));
+    }
+
     public async Task<InProgressPlanInfo?> TryGetCurrentInProgressPlanAsync(
     CancellationToken cancellationToken = default)
     {
