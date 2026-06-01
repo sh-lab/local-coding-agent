@@ -247,7 +247,7 @@ if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.
         return;
     }
 
-    var executionService = new PlanExecutionService(aiArtifactStore);
+    var executionService = new PlanExecutionService(aiArtifactStore, workspaceFileReader);
     var preview = await executionService.GetDryRunPreviewAsync();
 
     if (preview is null)
@@ -281,16 +281,17 @@ if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.
     }
     Console.WriteLine();
 
-    Console.WriteLine("# Relevant Files");
-    if (preview.RelevantFiles.Count == 0)
+    Console.WriteLine("# Reconfirmed Target Files");
+    if (preview.ReconfirmedTargetFiles.Count == 0)
     {
         Console.WriteLine("(none)");
     }
     else
     {
-        foreach (var item in preview.RelevantFiles)
+        foreach (var file in preview.ReconfirmedTargetFiles)
         {
-            Console.WriteLine($"- {item}");
+            Console.WriteLine(
+                $"- {file.SourcePath} | Exists={file.Exists} | Readable={file.Readable} | SummaryCurrent={file.SummaryIsCurrent} | Note={file.Note}");
         }
     }
     Console.WriteLine();

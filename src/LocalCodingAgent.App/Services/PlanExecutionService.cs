@@ -5,10 +5,14 @@ namespace LocalCodingAgent.App.Services;
 public sealed class PlanExecutionService
 {
     private readonly AiArtifactStore _artifactStore;
+    private readonly WorkspaceFileReader _fileReader;
 
-    public PlanExecutionService(AiArtifactStore artifactStore)
+    public PlanExecutionService(
+        AiArtifactStore artifactStore,
+        WorkspaceFileReader fileReader)
     {
         _artifactStore = artifactStore;
+        _fileReader = fileReader;
     }
 
     public async Task<PlanExecutionPreview?> GetDryRunPreviewAsync(
@@ -23,17 +27,64 @@ public sealed class PlanExecutionService
 
         var sections = ParseSections(currentPlan.PlanMarkdown);
 
+        var relevantFiles = ExtractRelevantFiles(sections);
+        var reconfirmedTargetFiles = await ReconfirmTargetFilesAsync(relevantFiles, cancellationToken);
+
         return new PlanExecutionPreview
         {
             PlanId = currentPlan.PlanId,
             PlanPath = currentPlan.PlanPath,
             Goal = ExtractGoal(sections),
-            RelevantFiles = ExtractListItems(sections, "Relevant Files"),
+            RelevantFiles = relevantFiles,
+            ReconfirmedTargetFiles = reconfirmedTargetFiles,
             ProposedMinimalChanges = ExtractNumberedOrBulletedItems(sections, "Proposed Minimal Changes"),
             RisksOrUnknowns = ExtractListItems(sections, "Risks / Unknowns"),
             ApprovalChecklist = ExtractChecklistItems(sections, "User Approval Checklist"),
             RawPlanMarkdown = currentPlan.PlanMarkdown
         };
+    }
+
+    private async Task<IReadOnlyList<PlanTargetFileStatus>> ReconfirmTargetFilesAsync(
+        IReadOnlyList<string> relevantFiles,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<PlanTargetFileStatus>();
+
+        foreach (var file in relevantFiles.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var readResult = _fileReader.Read(file);
+
+            var exists = !string.Equals(readResult.ErrorMessage, "File does not exist.", StringComparison.OrdinalIgnoreCase);
+            var readable = readResult.Success;
+            var summaryIsCurrent = false;
+
+            if (exists)
+            {
+                try
+                {
+                    summaryIsCurrent = await _artifactStore.IsSummaryCurrentAsync(file, cancellationToken);
+                }
+                catch
+                {
+                    summaryIsCurrent = false;
+                }
+            }
+
+            var note = readResult.Success
+                ? "OK"
+                : readResult.ErrorMessage ?? "Unknown error";
+
+            results.Add(new PlanTargetFileStatus
+            {
+                SourcePath = file,
+                Exists = exists,
+                Readable = readable,
+                SummaryIsCurrent = summaryIsCurrent,
+                Note = note
+            });
+        }
+
+        return results;
     }
 
     private static Dictionary<string, List<string>> ParseSections(string markdown)
@@ -75,10 +126,7 @@ public sealed class PlanExecutionService
             return null;
         }
 
-        // 見出しの # や空白を雑に除去して判定
         normalized = normalized.TrimStart('#', ' ', '\t').Trim();
-
-        // さらに "## # Goal" のような崩れに強くする
         normalized = normalized.TrimStart('#', ' ', '\t').Trim();
 
         var knownSections = new[]
@@ -117,6 +165,96 @@ public sealed class PlanExecutionService
             .ToArray();
 
         return string.Join(" ", contentLines).Trim();
+    }
+
+    private static IReadOnlyList<string> ExtractRelevantFiles(Dictionary<string, List<string>> sections)
+    {
+        if (!sections.TryGetValue("Relevant Files", out var lines))
+        {
+            return Array.Empty<string>();
+        }
+
+        var results = new List<string>();
+
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            // Markdown table separator / header lines
+            if (line.StartsWith("|---", StringComparison.Ordinal) ||
+                line.StartsWith("| ファイル", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // Markdown table row
+            if (line.StartsWith("|", StringComparison.Ordinal))
+            {
+                // 最初の列から `path` を優先抽出
+                var matches = Regex.Matches(line, @"`([^`]+)`");
+                if (matches.Count > 0)
+                {
+                    var path = matches[0].Groups[1].Value.Trim();
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        results.Add(path);
+                        continue;
+                    }
+                }
+
+                var cells = line.Split('|', StringSplitOptions.TrimEntries);
+                if (cells.Length >= 2)
+                {
+                    var candidate = cells[1].Trim().Trim('`');
+                    if (LooksLikePath(candidate))
+                    {
+                        results.Add(candidate);
+                        continue;
+                    }
+                }
+            }
+
+            // Fallback for bullet list
+            if (line.StartsWith("- ") || line.StartsWith("* "))
+            {
+                var candidate = line[2..].Trim().Trim('`');
+                if (LooksLikePath(candidate))
+                {
+                    results.Add(candidate);
+                }
+            }
+        }
+
+        return results
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool LooksLikePath(string candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return false;
+        }
+
+        return candidate.Contains('/', StringComparison.Ordinal) ||
+               candidate.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".md", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".java", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".c", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".h", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".cpp", StringComparison.OrdinalIgnoreCase) ||
+               candidate.EndsWith(".hpp", StringComparison.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyList<string> ExtractListItems(
