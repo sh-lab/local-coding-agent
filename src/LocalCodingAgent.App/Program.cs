@@ -235,6 +235,27 @@ if (args.Length >= 2 && string.Equals(args[0], "approve-plan", StringComparison.
     return;
 }
 
+if (args.Length >= 1 && string.Equals(args[0], "read-current-plan", StringComparison.OrdinalIgnoreCase))
+{
+    var currentPlan = await aiArtifactStore.TryGetCurrentInProgressPlanAsync();
+
+    if (currentPlan is null)
+    {
+        Console.WriteLine("No in-progress plan exists.");
+        return;
+    }
+
+    Console.WriteLine($"PlanId: {currentPlan.PlanId}");
+    Console.WriteLine($"PlanDirectory: {currentPlan.PlanDirectory}");
+    Console.WriteLine($"PlanFile: {currentPlan.PlanPath}");
+    Console.WriteLine($"Status: {currentPlan.Metadata.Status}");
+    Console.WriteLine($"CreatedAtUtc: {currentPlan.Metadata.CreatedAtUtc:O}");
+    Console.WriteLine($"ApprovedAtUtc: {currentPlan.Metadata.ApprovedAtUtc:O}");
+    Console.WriteLine();
+    Console.WriteLine(currentPlan.PlanMarkdown);
+    return;
+}
+
 if (args.Length >= 2 && string.Equals(args[0], "create-plan", StringComparison.OrdinalIgnoreCase))
 {
     var (directoryPath, instruction) = ParseCreatePlanArguments(args);

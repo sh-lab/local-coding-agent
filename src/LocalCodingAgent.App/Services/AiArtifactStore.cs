@@ -260,6 +260,53 @@ public sealed class AiArtifactStore
             Path.Combine(destinationPlanDirectory, "plan.md"));
     }
 
+    public async Task<InProgressPlanInfo?> TryGetCurrentInProgressPlanAsync(
+    CancellationToken cancellationToken = default)
+    {
+        Directory.CreateDirectory(_inProgressPlansRoot);
+
+        var planDirectories = Directory.EnumerateDirectories(_inProgressPlansRoot).ToArray();
+
+        if (planDirectories.Length == 0)
+        {
+            return null;
+        }
+
+        if (planDirectories.Length > 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected zero or one in-progress plan, but found {planDirectories.Length}.");
+        }
+
+        var planDirectory = planDirectories[0];
+        var planPath = Path.Combine(planDirectory, "plan.md");
+        var metadataPath = Path.Combine(planDirectory, "meta.json");
+
+        if (!File.Exists(planPath))
+        {
+            throw new FileNotFoundException("plan.md was not found.", planPath);
+        }
+
+        if (!File.Exists(metadataPath))
+        {
+            throw new FileNotFoundException("meta.json was not found.", metadataPath);
+        }
+
+        var metadata = await LoadPlanMetadataAsync(metadataPath, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to load plan metadata.");
+
+        var planMarkdown = await File.ReadAllTextAsync(planPath, cancellationToken);
+
+        return new InProgressPlanInfo
+        {
+            PlanId = metadata.PlanId,
+            PlanDirectory = planDirectory,
+            PlanPath = planPath,
+            PlanMarkdown = planMarkdown,
+            Metadata = metadata
+        };
+    }
+
     private async Task<PlanMetadata?> LoadPlanMetadataAsync(string metadataPath, CancellationToken cancellationToken)
     {
         await using var stream = File.OpenRead(metadataPath);
