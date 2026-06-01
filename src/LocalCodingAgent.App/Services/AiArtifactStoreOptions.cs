@@ -8,4 +8,5 @@ public sealed class AiArtifactStoreOptions
     public string PendingPlansDirectory { get; set; } = "pending";
     public string InProgressPlansDirectory { get; set; } = "in-progress";
     public string CompletedPlansDirectory { get; set; } = "completed";
+    public string OutputDirectory { get; set; } = "output";
 }

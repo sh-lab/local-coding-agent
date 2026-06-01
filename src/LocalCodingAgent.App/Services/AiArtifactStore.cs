@@ -18,6 +18,7 @@ public sealed class AiArtifactStore
     private readonly string _inProgressPlansRoot;
     private readonly string _completedPlansRoot;
     private readonly StringComparison _pathComparison;
+    private readonly string _outputRoot;
 
     public AiArtifactStore(string workspaceRoot, AiArtifactStoreOptions options)
     {
@@ -65,12 +66,19 @@ public sealed class AiArtifactStore
         _inProgressPlansRoot = Path.GetFullPath(Path.Combine(_plansRoot, inProgressPlansDirectory));
         _completedPlansRoot = Path.GetFullPath(Path.Combine(_plansRoot, completedPlansDirectory));
 
+        var outputDirectory = string.IsNullOrWhiteSpace(options.OutputDirectory)
+        ? "output"
+        : options.OutputDirectory.Trim();
+
+        _outputRoot = Path.GetFullPath(Path.Combine(_artifactRoot, outputDirectory));
+
         if (!IsUnderWorkspace(_artifactRoot) ||
             !IsUnderWorkspace(_summariesRoot) ||
             !IsUnderWorkspace(_plansRoot) ||
             !IsUnderWorkspace(_pendingPlansRoot) ||
             !IsUnderWorkspace(_inProgressPlansRoot) ||
-            !IsUnderWorkspace(_completedPlansRoot))
+            !IsUnderWorkspace(_completedPlansRoot) ||
+            !IsUnderWorkspace(_outputRoot))
         {
             throw new InvalidOperationException("Artifact directories must stay inside the workspace.");
         }
@@ -83,7 +91,7 @@ public sealed class AiArtifactStore
     public string PendingPlansRoot => _pendingPlansRoot;
     public string InProgressPlansRoot => _inProgressPlansRoot;
     public string CompletedPlansRoot => _completedPlansRoot;
-
+    public string OutputRoot => _outputRoot;
     public string GetSummaryPath(string sourceRelativePath)
     {
         var normalizedRelativePath = NormalizeSourceRelativePath(sourceRelativePath);
