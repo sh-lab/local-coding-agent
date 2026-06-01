@@ -14,6 +14,9 @@ public sealed class AiArtifactStore
     private readonly string _artifactRoot;
     private readonly string _summariesRoot;
     private readonly string _plansRoot;
+    private readonly string _pendingPlansRoot;
+    private readonly string _inProgressPlansRoot;
+    private readonly string _completedPlansRoot;
     private readonly StringComparison _pathComparison;
 
     public AiArtifactStore(string workspaceRoot, AiArtifactStoreOptions options)
@@ -42,13 +45,32 @@ public sealed class AiArtifactStore
             ? "plans"
             : options.PlansDirectory.Trim();
 
+        var pendingPlansDirectory = string.IsNullOrWhiteSpace(options.PendingPlansDirectory)
+            ? "pending"
+            : options.PendingPlansDirectory.Trim();
+
+        var inProgressPlansDirectory = string.IsNullOrWhiteSpace(options.InProgressPlansDirectory)
+            ? "in-progress"
+            : options.InProgressPlansDirectory.Trim();
+
+        var completedPlansDirectory = string.IsNullOrWhiteSpace(options.CompletedPlansDirectory)
+            ? "completed"
+            : options.CompletedPlansDirectory.Trim();
+
         _artifactRoot = Path.GetFullPath(Path.Combine(_workspaceRoot, rootDirectory));
         _summariesRoot = Path.GetFullPath(Path.Combine(_artifactRoot, summariesDirectory));
+
         _plansRoot = Path.GetFullPath(Path.Combine(_artifactRoot, plansDirectory));
+        _pendingPlansRoot = Path.GetFullPath(Path.Combine(_plansRoot, pendingPlansDirectory));
+        _inProgressPlansRoot = Path.GetFullPath(Path.Combine(_plansRoot, inProgressPlansDirectory));
+        _completedPlansRoot = Path.GetFullPath(Path.Combine(_plansRoot, completedPlansDirectory));
 
         if (!IsUnderWorkspace(_artifactRoot) ||
             !IsUnderWorkspace(_summariesRoot) ||
-            !IsUnderWorkspace(_plansRoot))
+            !IsUnderWorkspace(_plansRoot) ||
+            !IsUnderWorkspace(_pendingPlansRoot) ||
+            !IsUnderWorkspace(_inProgressPlansRoot) ||
+            !IsUnderWorkspace(_completedPlansRoot))
         {
             throw new InvalidOperationException("Artifact directories must stay inside the workspace.");
         }
@@ -58,6 +80,9 @@ public sealed class AiArtifactStore
     public string ArtifactRoot => _artifactRoot;
     public string SummariesRoot => _summariesRoot;
     public string PlansRoot => _plansRoot;
+    public string PendingPlansRoot => _pendingPlansRoot;
+    public string InProgressPlansRoot => _inProgressPlansRoot;
+    public string CompletedPlansRoot => _completedPlansRoot;
 
     public string GetSummaryPath(string sourceRelativePath)
     {
@@ -151,18 +176,147 @@ public sealed class AiArtifactStore
             throw new ArgumentException("Plan content is required.", nameof(planMarkdown));
         }
 
-        Directory.CreateDirectory(_plansRoot);
+        Directory.CreateDirectory(_pendingPlansRoot);
 
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
         var slug = ToSafeSlug(instruction);
-        var fileName = string.IsNullOrWhiteSpace(slug)
-            ? $"{timestamp}.plan.md"
-            : $"{timestamp}-{slug}.plan.md";
+        var planId = string.IsNullOrWhiteSpace(slug)
+            ? timestamp
+            : $"{timestamp}-{slug}";
 
-        var fullPath = Path.Combine(_plansRoot, fileName);
-        await File.WriteAllTextAsync(fullPath, planMarkdown, cancellationToken);
+        var planDirectory = Path.Combine(_pendingPlansRoot, planId);
+        Directory.CreateDirectory(planDirectory);
 
-        return fullPath;
+        var planPath = Path.Combine(planDirectory, "plan.md");
+        var metadataPath = Path.Combine(planDirectory, "meta.json");
+
+        await File.WriteAllTextAsync(planPath, planMarkdown, cancellationToken);
+
+        var metadata = new PlanMetadata
+        {
+            PlanId = planId,
+            Instruction = instruction,
+            Status = "pending",
+            CreatedAtUtc = DateTime.UtcNow,
+            ApprovedAtUtc = null
+        };
+
+        await using var stream = File.Create(metadataPath);
+        await JsonSerializer.SerializeAsync(stream, metadata, JsonOptions, cancellationToken);
+
+        return planPath;
+    }
+
+    public async Task<(string PlanId, string PlanDirectory, string PlanPath)> ApprovePlanAsync(
+        string planFileOrPlanId,
+        CancellationToken cancellationToken = default)
+    {
+        var sourcePlanDirectory = ResolvePendingPlanDirectory(planFileOrPlanId);
+        var sourcePlanPath = Path.Combine(sourcePlanDirectory, "plan.md");
+        var sourceMetadataPath = Path.Combine(sourcePlanDirectory, "meta.json");
+
+        if (!File.Exists(sourcePlanPath))
+        {
+            throw new FileNotFoundException("plan.md was not found.", sourcePlanPath);
+        }
+
+        if (!File.Exists(sourceMetadataPath))
+        {
+            throw new FileNotFoundException("meta.json was not found.", sourceMetadataPath);
+        }
+
+        Directory.CreateDirectory(_inProgressPlansRoot);
+
+        var existingInProgressPlans = Directory.EnumerateDirectories(_inProgressPlansRoot).ToArray();
+        if (existingInProgressPlans.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"An in-progress plan already exists: {Path.GetFileName(existingInProgressPlans[0])}");
+        }
+
+        var metadata = await LoadPlanMetadataAsync(sourceMetadataPath, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to load plan metadata.");
+
+        metadata.Status = "in-progress";
+        metadata.ApprovedAtUtc = DateTime.UtcNow;
+
+        await using (var stream = File.Create(sourceMetadataPath))
+        {
+            await JsonSerializer.SerializeAsync(stream, metadata, JsonOptions, cancellationToken);
+        }
+
+        var destinationPlanDirectory = Path.Combine(_inProgressPlansRoot, metadata.PlanId);
+
+        if (Directory.Exists(destinationPlanDirectory))
+        {
+            throw new InvalidOperationException("The destination in-progress plan directory already exists.");
+        }
+
+        Directory.Move(sourcePlanDirectory, destinationPlanDirectory);
+
+        return (
+            metadata.PlanId,
+            destinationPlanDirectory,
+            Path.Combine(destinationPlanDirectory, "plan.md"));
+    }
+
+    private async Task<PlanMetadata?> LoadPlanMetadataAsync(string metadataPath, CancellationToken cancellationToken)
+    {
+        await using var stream = File.OpenRead(metadataPath);
+        return await JsonSerializer.DeserializeAsync<PlanMetadata>(stream, JsonOptions, cancellationToken);
+    }
+
+    private string ResolvePendingPlanDirectory(string planFileOrPlanId)
+    {
+        if (string.IsNullOrWhiteSpace(planFileOrPlanId))
+        {
+            throw new ArgumentException("Plan identifier is required.", nameof(planFileOrPlanId));
+        }
+
+        Directory.CreateDirectory(_pendingPlansRoot);
+
+        if (File.Exists(planFileOrPlanId))
+        {
+            var fullPath = Path.GetFullPath(planFileOrPlanId);
+            var directory = Path.GetDirectoryName(fullPath)
+                ?? throw new InvalidOperationException("Failed to determine plan directory.");
+
+            if (!IsUnderDirectory(directory, _pendingPlansRoot))
+            {
+                throw new InvalidOperationException("The specified plan file is not under pending plans.");
+            }
+
+            return directory;
+        }
+
+        if (Directory.Exists(planFileOrPlanId))
+        {
+            var fullPath = Path.GetFullPath(planFileOrPlanId);
+
+            if (!IsUnderDirectory(fullPath, _pendingPlansRoot))
+            {
+                throw new InvalidOperationException("The specified plan directory is not under pending plans.");
+            }
+
+            return fullPath;
+        }
+
+        var directDirectory = Path.Combine(_pendingPlansRoot, planFileOrPlanId);
+        if (Directory.Exists(directDirectory))
+        {
+            return directDirectory;
+        }
+
+        var directPlanFile = Path.Combine(_pendingPlansRoot, planFileOrPlanId);
+        if (File.Exists(directPlanFile))
+        {
+            var directory = Path.GetDirectoryName(directPlanFile)
+                ?? throw new InvalidOperationException("Failed to determine plan directory.");
+
+            return directory;
+        }
+
+        throw new FileNotFoundException("The specified pending plan could not be found.", planFileOrPlanId);
     }
 
     private (DateTime LastWriteTimeUtc, long Length, string Hash) GetSourceMetadata(string sourceRelativePath)
@@ -219,10 +373,15 @@ public sealed class AiArtifactStore
 
     private bool IsUnderWorkspace(string fullPath)
     {
-        var workspaceWithSeparator = EnsureTrailingSeparator(_workspaceRoot);
+        return IsUnderDirectory(fullPath, _workspaceRoot);
+    }
+
+    private bool IsUnderDirectory(string fullPath, string rootDirectory)
+    {
+        var rootWithSeparator = EnsureTrailingSeparator(rootDirectory);
         var targetWithSeparator = EnsureTrailingSeparator(fullPath);
 
-        return targetWithSeparator.StartsWith(workspaceWithSeparator, _pathComparison);
+        return targetWithSeparator.StartsWith(rootWithSeparator, _pathComparison);
     }
 
     private static string EnsureTrailingSeparator(string path)

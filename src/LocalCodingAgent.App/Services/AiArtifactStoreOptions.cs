@@ -5,4 +5,7 @@ public sealed class AiArtifactStoreOptions
     public string RootDirectory { get; set; } = ".ai-work";
     public string SummariesDirectory { get; set; } = "summaries";
     public string PlansDirectory { get; set; } = "plans";
+    public string PendingPlansDirectory { get; set; } = "pending";
+    public string InProgressPlansDirectory { get; set; } = "in-progress";
+    public string CompletedPlansDirectory { get; set; } = "completed";
 }

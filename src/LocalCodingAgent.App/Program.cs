@@ -225,6 +225,16 @@ if (args.Length >= 2 && string.Equals(args[0], "read-summary", StringComparison.
     return;
 }
 
+if (args.Length >= 2 && string.Equals(args[0], "approve-plan", StringComparison.OrdinalIgnoreCase))
+{
+    var result = await aiArtifactStore.ApprovePlanAsync(args[1]);
+
+    Console.WriteLine($"Approved: {result.PlanId}");
+    Console.WriteLine($"MovedTo: {result.PlanDirectory}");
+    Console.WriteLine($"PlanFile: {result.PlanPath}");
+    return;
+}
+
 if (args.Length >= 2 && string.Equals(args[0], "create-plan", StringComparison.OrdinalIgnoreCase))
 {
     var (directoryPath, instruction) = ParseCreatePlanArguments(args);
