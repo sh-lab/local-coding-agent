@@ -28,8 +28,10 @@ public sealed class PlanExecutionService
         var sections = ParseSections(currentPlan.PlanMarkdown);
 
         var relevantFiles = ExtractRelevantFiles(sections);
-        var reconfirmedTargetFiles = await ReconfirmTargetFilesAsync(relevantFiles, cancellationToken);
-        var blockingReasons = BuildBlockingReasons(relevantFiles, reconfirmedTargetFiles);
+        var plannedOutputFiles = ExtractPlannedOutputFiles(sections);
+        var reconfirmedTargetFiles = await ReconfirmTargetFilesAsync(plannedOutputFiles, cancellationToken);
+        var blockingReasons = BuildBlockingReasons(plannedOutputFiles, reconfirmedTargetFiles);
+
 
         return new PlanExecutionPreview
         {
@@ -37,6 +39,7 @@ public sealed class PlanExecutionService
             PlanPath = currentPlan.PlanPath,
             Goal = ExtractGoal(sections),
             RelevantFiles = relevantFiles,
+            PlannedOutputFiles = plannedOutputFiles,
             ReconfirmedTargetFiles = reconfirmedTargetFiles,
             ProposedMinimalChanges = ExtractNumberedOrBulletedItems(sections, "Proposed Minimal Changes"),
             RisksOrUnknowns = ExtractListItems(sections, "Risks / Unknowns"),
@@ -48,14 +51,14 @@ public sealed class PlanExecutionService
     }
 
     private async Task<IReadOnlyList<PlanTargetFileStatus>> ReconfirmTargetFilesAsync(
-        IReadOnlyList<string> relevantFiles,
-        CancellationToken cancellationToken)
+       IReadOnlyList<PlannedOutputFile> plannedOutputFiles,
+       CancellationToken cancellationToken)
     {
         var results = new List<PlanTargetFileStatus>();
 
-        foreach (var file in relevantFiles.Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var file in plannedOutputFiles)
         {
-            var readResult = _fileReader.Read(file);
+            var readResult = _fileReader.Read(file.Path);
 
             var exists = !string.Equals(readResult.ErrorMessage, "File does not exist.", StringComparison.OrdinalIgnoreCase);
             var readable = readResult.Success;
@@ -65,7 +68,7 @@ public sealed class PlanExecutionService
             {
                 try
                 {
-                    summaryIsCurrent = await _artifactStore.IsSummaryCurrentAsync(file, cancellationToken);
+                    summaryIsCurrent = await _artifactStore.IsSummaryCurrentAsync(file.Path, cancellationToken);
                 }
                 catch
                 {
@@ -79,7 +82,7 @@ public sealed class PlanExecutionService
 
             results.Add(new PlanTargetFileStatus
             {
-                SourcePath = file,
+                SourcePath = file.Path,
                 Exists = exists,
                 Readable = readable,
                 SummaryIsCurrent = summaryIsCurrent,
@@ -137,6 +140,7 @@ public sealed class PlanExecutionService
             "Goal",
             "Confirmed Facts",
             "Relevant Files",
+            "Planned Output Files",
             "Proposed Minimal Changes",
             "Optional Future Refactors",
             "Risks / Unknowns",
@@ -328,21 +332,20 @@ public sealed class PlanExecutionService
     }
 
     private static IReadOnlyList<string> BuildBlockingReasons(
-    IReadOnlyList<string> relevantFiles,
-    IReadOnlyList<PlanTargetFileStatus> reconfirmedTargetFiles)
+       IReadOnlyList<PlannedOutputFile> plannedOutputFiles,
+       IReadOnlyList<PlanTargetFileStatus> reconfirmedTargetFiles)
     {
         var reasons = new List<string>();
 
-        if (relevantFiles.Count == 0)
+        if (plannedOutputFiles.Count == 0)
         {
-            reasons.Add("Relevant Files が空のため、実行対象ファイルを特定できません。");
+            reasons.Add("Planned Output Files が空のため、出力対象ファイルを特定できません。");
             return reasons;
         }
 
         foreach (var file in reconfirmedTargetFiles)
         {
-            // 存在しないファイルは、今回の段階では
-            // 新規追加候補の可能性があるためブロッキング理由にしない
+            // 新規ファイル候補は存在しなくてもブロックしない
             if (!file.Exists)
             {
                 continue;
@@ -361,5 +364,70 @@ public sealed class PlanExecutionService
         }
 
         return reasons;
+    }
+
+    private static IReadOnlyList<PlannedOutputFile> ExtractPlannedOutputFiles(
+    Dictionary<string, List<string>> sections)
+    {
+        if (!sections.TryGetValue("Planned Output Files", out var lines))
+        {
+            return Array.Empty<PlannedOutputFile>();
+        }
+
+        var results = new List<PlannedOutputFile>();
+
+        foreach (var raw in lines)
+        {
+            var line = raw.Trim();
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            if (line.StartsWith("|---", StringComparison.Ordinal) ||
+                line.StartsWith("| Path", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!line.StartsWith("|", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var cells = line.Split('|', StringSplitOptions.TrimEntries);
+
+            if (cells.Length < 4)
+            {
+                continue;
+            }
+
+            var path = cells[1].Trim().Trim('`');
+            var kind = cells[2].Trim().Trim('`').ToLowerInvariant();
+            var reason = cells[3].Trim().Trim('`');
+
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                continue;
+            }
+
+            if (kind is not ("modified" or "new"))
+            {
+                continue;
+            }
+
+            results.Add(new PlannedOutputFile
+            {
+                Path = path,
+                Kind = kind,
+                Reason = reason
+            });
+        }
+
+        return results
+            .GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.First())
+            .ToArray();
     }
 }

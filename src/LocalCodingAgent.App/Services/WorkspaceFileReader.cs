@@ -134,6 +134,63 @@ public sealed class WorkspaceFileReader
         );
     }
 
+    public WorkspaceFileTextResult ReadRawText(string relativePath)
+    {
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            return new WorkspaceFileTextResult(false, relativePath ?? string.Empty, null, "Path is required.");
+        }
+
+        if (Path.IsPathRooted(relativePath))
+        {
+            return new WorkspaceFileTextResult(false, relativePath, null, "Absolute paths are not allowed.");
+        }
+
+        var normalizedRelativePath = relativePath.Replace('\\', '/');
+
+        if (normalizedRelativePath.StartsWith("../", StringComparison.Ordinal) ||
+            normalizedRelativePath.Contains("/../", StringComparison.Ordinal) ||
+            normalizedRelativePath == "..")
+        {
+            return new WorkspaceFileTextResult(false, relativePath, null, "Path traversal is not allowed.");
+        }
+
+        var fullPath = Path.GetFullPath(Path.Combine(_workspaceRoot, relativePath));
+
+        if (!IsUnderWorkspace(fullPath))
+        {
+            return new WorkspaceFileTextResult(false, relativePath, null, "Access outside the workspace is not allowed.");
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            return new WorkspaceFileTextResult(false, relativePath, null, "File does not exist.");
+        }
+
+        var extension = Path.GetExtension(fullPath);
+        if (!_allowedExtensions.Contains(extension))
+        {
+            return new WorkspaceFileTextResult(false, relativePath, null, $"File type '{extension}' is not allowed.");
+        }
+
+        var fileInfo = new FileInfo(fullPath);
+        if (fileInfo.Length > _maxBytes)
+        {
+            return new WorkspaceFileTextResult(false, relativePath, null,
+                $"File is too large. Maximum allowed size is {_maxBytes} bytes.");
+        }
+
+        try
+        {
+            var content = File.ReadAllText(fullPath);
+            return new WorkspaceFileTextResult(true, normalizedRelativePath, content, null);
+        }
+        catch (Exception ex)
+        {
+            return new WorkspaceFileTextResult(false, relativePath, null, $"Failed to read file: {ex.Message}");
+        }
+    }
+
     private bool IsUnderWorkspace(string fullPath)
     {
         var workspaceWithSeparator = EnsureTrailingSeparator(_workspaceRoot);

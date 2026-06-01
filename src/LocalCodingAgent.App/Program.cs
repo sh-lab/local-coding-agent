@@ -23,6 +23,7 @@ var artifactStoreOptions =
     ?? throw new InvalidOperationException("AiArtifactStore settings are missing.");
 
 var workspaceRoot = Directory.GetCurrentDirectory();
+var copilotInstructionsProvider = new CopilotInstructionsProvider(workspaceRoot);
 var workspaceFileReader = new WorkspaceFileReader(workspaceRoot, fileReaderOptions);
 var workspaceFileLister = new WorkspaceFileLister(
     workspaceRoot,
@@ -241,12 +242,6 @@ if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.
         args.Length >= 2 &&
         string.Equals(args[1], "--dry-run", StringComparison.OrdinalIgnoreCase);
 
-    if (!isDryRun)
-    {
-        Console.Error.WriteLine("Error: only '--dry-run' is supported at this stage.");
-        return;
-    }
-
     var executionService = new PlanExecutionService(aiArtifactStore, workspaceFileReader);
     var preview = await executionService.GetDryRunPreviewAsync();
 
@@ -256,90 +251,104 @@ if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.
         return;
     }
 
-    Console.WriteLine($"PlanId: {preview.PlanId}");
-    Console.WriteLine($"PlanPath: {preview.PlanPath}");
-    Console.WriteLine($"Executable: {preview.CanExecute}");
-    Console.WriteLine();
-
-    if (!string.IsNullOrWhiteSpace(preview.Goal))
+    if (isDryRun)
     {
-        Console.WriteLine("# Goal");
-        Console.WriteLine(preview.Goal);
+        Console.WriteLine($"PlanId: {preview.PlanId}");
+        Console.WriteLine($"PlanPath: {preview.PlanPath}");
+        Console.WriteLine($"Executable: {preview.CanExecute}");
         Console.WriteLine();
-    }
 
-    Console.WriteLine("# Proposed Minimal Changes");
-    if (preview.ProposedMinimalChanges.Count == 0)
-    {
-        Console.WriteLine("(none)");
-    }
-    else
-    {
-        foreach (var item in preview.ProposedMinimalChanges)
+        if (!string.IsNullOrWhiteSpace(preview.Goal))
         {
-            Console.WriteLine($"- {item}");
+            Console.WriteLine("# Goal");
+            Console.WriteLine(preview.Goal);
+            Console.WriteLine();
         }
-    }
-    Console.WriteLine();
 
-    Console.WriteLine("# Reconfirmed Target Files");
-    if (preview.ReconfirmedTargetFiles.Count == 0)
-    {
-        Console.WriteLine("(none)");
-    }
-    else
-    {
-        foreach (var file in preview.ReconfirmedTargetFiles)
+        Console.WriteLine("# Planned Output Files");
+        if (preview.PlannedOutputFiles.Count == 0)
         {
-            Console.WriteLine(
-                $"- {file.SourcePath} | Exists={file.Exists} | Readable={file.Readable} | SummaryCurrent={file.SummaryIsCurrent} | Note={file.Note}");
+            Console.WriteLine("(none)");
         }
-    }
-    Console.WriteLine();
-
-    Console.WriteLine("# Risks / Unknowns");
-    if (preview.RisksOrUnknowns.Count == 0)
-    {
-        Console.WriteLine("(none)");
-    }
-    else
-    {
-        foreach (var item in preview.RisksOrUnknowns)
+        else
         {
-            Console.WriteLine($"- {item}");
+            foreach (var file in preview.PlannedOutputFiles)
+            {
+                Console.WriteLine($"- {file.Path} | Kind={file.Kind} | Reason={file.Reason}");
+            }
         }
-    }
-    Console.WriteLine();
+        Console.WriteLine();
 
-    Console.WriteLine("# User Approval Checklist");
-    if (preview.ApprovalChecklist.Count == 0)
-    {
-        Console.WriteLine("(none)");
-    }
-    else
-    {
-        foreach (var item in preview.ApprovalChecklist)
+        Console.WriteLine("# Reconfirmed Target Files");
+        if (preview.ReconfirmedTargetFiles.Count == 0)
         {
-            Console.WriteLine($"- {item}");
+            Console.WriteLine("(none)");
         }
+        else
+        {
+            foreach (var file in preview.ReconfirmedTargetFiles)
+            {
+                Console.WriteLine(
+                    $"- {file.SourcePath} | Exists={file.Exists} | Readable={file.Readable} | SummaryCurrent={file.SummaryIsCurrent} | Note={file.Note}");
+            }
+        }
+        Console.WriteLine();
+
+        Console.WriteLine("# Proposed Minimal Changes");
+        if (preview.ProposedMinimalChanges.Count == 0)
+        {
+            Console.WriteLine("(none)");
+        }
+        else
+        {
+            foreach (var item in preview.ProposedMinimalChanges)
+            {
+                Console.WriteLine($"- {item}");
+            }
+        }
+        Console.WriteLine();
+
+        Console.WriteLine("# Execution Readiness");
+        if (preview.CanExecute)
+        {
+            Console.WriteLine("This plan is executable in principle.");
+        }
+        else
+        {
+            Console.WriteLine("This plan is NOT executable yet.");
+            Console.WriteLine();
+            Console.WriteLine("Blocking reasons:");
+            foreach (var reason in preview.BlockingReasons)
+            {
+                Console.WriteLine($"- {reason}");
+            }
+        }
+
+        return;
     }
 
-    Console.WriteLine("# Execution Readiness");
-if (preview.CanExecute)
-{
-    Console.WriteLine("This plan is executable in principle.");
-}
-else
-{
-    Console.WriteLine("This plan is NOT executable yet.");
+    var implementationAgent = CreateImplementationAgent(chatClient);
+    var outputStore = new ExecutionOutputStore(
+        workspaceRoot,
+        aiArtifactStore.OutputRoot,
+        fileReaderOptions.AllowedExtensions);
+
+        var copilotInstructions = await copilotInstructionsProvider.TryLoadAsync();
+
+    var generationService = new PlanOutputGenerationService(
+        executionService,
+        workspaceFileReader,
+        aiArtifactStore,
+        outputStore,
+        implementationAgent,
+        copilotInstructions);
+
+    var result = await generationService.ExecuteToOutputAsync();
+
     Console.WriteLine();
-    Console.WriteLine("Blocking reasons:");
-    foreach (var reason in preview.BlockingReasons)
-    {
-        Console.WriteLine($"- {reason}");
-    }
-}
-
+    Console.WriteLine($"PlanId: {result.Preview.PlanId}");
+    Console.WriteLine($"OutputRoot: {outputStore.GetPlanOutputRoot(result.Preview.PlanId)}");
+    Console.WriteLine($"Manifest: {result.ManifestPath}");
     return;
 }
 
@@ -382,7 +391,9 @@ if (args.Length >= 2 && string.Equals(args[0], "create-plan", StringComparison.O
         aiArtifactStore,
         plannerAgent);
 
-    var result = await planService.CreatePlanAsync(instruction, directoryPath);
+    var copilotInstructions = await copilotInstructionsProvider.TryLoadAsync();
+
+    var result = await planService.CreatePlanAsync(instruction, directoryPath, copilotInstructions);
 
     Console.WriteLine(result.PlanText);
     Console.WriteLine();
@@ -445,6 +456,36 @@ static AIAgent CreatePlannerAgent(IChatClient chatClient)
             - If the summaries are insufficient, include confirmation items instead of guessing.
             - Do not optimize for ideal architecture unless the user explicitly asks for a large redesign.
             - Favor staged, reviewable changes over broad rewrites.
+            """
+    );
+}
+
+static AIAgent CreateImplementationAgent(IChatClient chatClient)
+{
+    return chatClient.AsAIAgent(
+        name: "ImplementationAgent",
+        instructions:
+            """
+            You generate full source files for a local coding agent.
+
+            Hard requirements:
+            - Output only the full file content.
+            - Do not include explanations.
+            - Do not include markdown fences.
+            - Keep the change as small as possible.
+            - Preserve existing behavior unless the approved plan explicitly changes it.
+            - Do not invent new helper classes or new files unless they are explicitly included in Planned Output Files.
+            - Do not reference variables, methods, tuple members, types, or files that are not available in the current file context or explicitly described in the plan/context.
+            - The result must be internally consistent and compile in principle with the surrounding existing code.
+
+            For modified files:
+            - Use the current file content as the base.
+            - Preserve unrelated logic.
+            - Refactor minimally.
+
+            For new files:
+            - Only generate them if they are explicitly listed in Planned Output Files.
+            - Keep them minimal and aligned with the approved plan.
             """
     );
 }

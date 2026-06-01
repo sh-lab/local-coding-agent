@@ -5,7 +5,10 @@ public sealed class PlanExecutionPreview
     public string PlanId { get; init; } = string.Empty;
     public string PlanPath { get; init; } = string.Empty;
     public string Goal { get; init; } = string.Empty;
+
     public IReadOnlyList<string> RelevantFiles { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<PlannedOutputFile> PlannedOutputFiles { get; init; } = Array.Empty<PlannedOutputFile>();
+
     public IReadOnlyList<PlanTargetFileStatus> ReconfirmedTargetFiles { get; init; } = Array.Empty<PlanTargetFileStatus>();
     public IReadOnlyList<string> ProposedMinimalChanges { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> RisksOrUnknowns { get; init; } = Array.Empty<string>();
