@@ -235,6 +235,96 @@ if (args.Length >= 2 && string.Equals(args[0], "approve-plan", StringComparison.
     return;
 }
 
+if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.OrdinalIgnoreCase))
+{
+    var isDryRun =
+        args.Length >= 2 &&
+        string.Equals(args[1], "--dry-run", StringComparison.OrdinalIgnoreCase);
+
+    if (!isDryRun)
+    {
+        Console.Error.WriteLine("Error: only '--dry-run' is supported at this stage.");
+        return;
+    }
+
+    var executionService = new PlanExecutionService(aiArtifactStore);
+    var preview = await executionService.GetDryRunPreviewAsync();
+
+    if (preview is null)
+    {
+        Console.WriteLine("No in-progress plan exists.");
+        return;
+    }
+
+    Console.WriteLine($"PlanId: {preview.PlanId}");
+    Console.WriteLine($"PlanPath: {preview.PlanPath}");
+    Console.WriteLine();
+
+    if (!string.IsNullOrWhiteSpace(preview.Goal))
+    {
+        Console.WriteLine("# Goal");
+        Console.WriteLine(preview.Goal);
+        Console.WriteLine();
+    }
+
+    Console.WriteLine("# Proposed Minimal Changes");
+    if (preview.ProposedMinimalChanges.Count == 0)
+    {
+        Console.WriteLine("(none)");
+    }
+    else
+    {
+        foreach (var item in preview.ProposedMinimalChanges)
+        {
+            Console.WriteLine($"- {item}");
+        }
+    }
+    Console.WriteLine();
+
+    Console.WriteLine("# Relevant Files");
+    if (preview.RelevantFiles.Count == 0)
+    {
+        Console.WriteLine("(none)");
+    }
+    else
+    {
+        foreach (var item in preview.RelevantFiles)
+        {
+            Console.WriteLine($"- {item}");
+        }
+    }
+    Console.WriteLine();
+
+    Console.WriteLine("# Risks / Unknowns");
+    if (preview.RisksOrUnknowns.Count == 0)
+    {
+        Console.WriteLine("(none)");
+    }
+    else
+    {
+        foreach (var item in preview.RisksOrUnknowns)
+        {
+            Console.WriteLine($"- {item}");
+        }
+    }
+    Console.WriteLine();
+
+    Console.WriteLine("# User Approval Checklist");
+    if (preview.ApprovalChecklist.Count == 0)
+    {
+        Console.WriteLine("(none)");
+    }
+    else
+    {
+        foreach (var item in preview.ApprovalChecklist)
+        {
+            Console.WriteLine($"- {item}");
+        }
+    }
+
+    return;
+}
+
 if (args.Length >= 1 && string.Equals(args[0], "read-current-plan", StringComparison.OrdinalIgnoreCase))
 {
     var currentPlan = await aiArtifactStore.TryGetCurrentInProgressPlanAsync();
