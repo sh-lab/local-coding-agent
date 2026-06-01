@@ -341,9 +341,10 @@ public sealed class PlanExecutionService
 
         foreach (var file in reconfirmedTargetFiles)
         {
+            // 存在しないファイルは、今回の段階では
+            // 新規追加候補の可能性があるためブロッキング理由にしない
             if (!file.Exists)
             {
-                reasons.Add($"対象ファイルが存在しません: {file.SourcePath}");
                 continue;
             }
 
