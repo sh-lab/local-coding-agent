@@ -4,11 +4,8 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using OllamaSharp;
 
-var configuration = new ConfigurationBuilder()
-    .SetBasePath(Directory.GetCurrentDirectory())
-    .AddJsonFile("appsettings.json", optional: false)
-    .AddJsonFile("appsettings.Local.json", optional: true)
-    .Build();
+var commandArgs = StripGlobalOptions(args);
+var configuration = LoadConfiguration(args);
 
 var fileReaderOptions =
     configuration.GetSection("WorkspaceFileReader").Get<WorkspaceFileReaderOptions>()
@@ -35,9 +32,9 @@ var aiArtifactStore = new AiArtifactStore(workspaceRoot, artifactStoreOptions);
 var readFileTool = new ReadFileTool(workspaceFileReader);
 var listFilesTool = new ListFilesTool(workspaceFileLister);
 
-if (args.Length >= 2 && string.Equals(args[0], "read-file", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 2 && string.Equals(commandArgs[0], "read-file", StringComparison.OrdinalIgnoreCase))
 {
-    var result = workspaceFileReader.Read(args[1]);
+    var result = workspaceFileReader.Read(commandArgs[1]);
 
     if (!result.Success)
     {
@@ -58,9 +55,9 @@ if (args.Length >= 2 && string.Equals(args[0], "read-file", StringComparison.Ord
     return;
 }
 
-if (args.Length >= 2 && string.Equals(args[0], "list-files", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 2 && string.Equals(commandArgs[0], "list-files", StringComparison.OrdinalIgnoreCase))
 {
-    var result = workspaceFileLister.ListFiles(args[1]);
+    var result = workspaceFileLister.ListFiles(commandArgs[1]);
 
     if (!result.Success)
     {
@@ -82,15 +79,15 @@ if (args.Length >= 2 && string.Equals(args[0], "list-files", StringComparison.Or
     return;
 }
 
-if (args.Length >= 2 && string.Equals(args[0], "summary-path", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 2 && string.Equals(commandArgs[0], "summary-path", StringComparison.OrdinalIgnoreCase))
 {
-    Console.WriteLine(aiArtifactStore.GetSummaryPath(args[1]));
+    Console.WriteLine(aiArtifactStore.GetSummaryPath(commandArgs[1]));
     return;
 }
 
-if (args.Length >= 2 && string.Equals(args[0], "summary-status", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 2 && string.Equals(commandArgs[0], "summary-status", StringComparison.OrdinalIgnoreCase))
 {
-    var status = await GetSummaryStatusAsync(aiArtifactStore, args[1]);
+    var status = await GetSummaryStatusAsync(aiArtifactStore, commandArgs[1]);
     Console.WriteLine(status);
     return;
 }
@@ -125,7 +122,7 @@ var ollamaHttpClient = new HttpClient
 
 IChatClient chatClient = new OllamaApiClient(ollamaHttpClient, modelName);
 
-if (args.Length >= 2 && string.Equals(args[0], "summarize-file", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 2 && string.Equals(commandArgs[0], "summarize-file", StringComparison.OrdinalIgnoreCase))
 {
     AIAgent summarizerAgent = CreateSummarizerAgent(chatClient);
 
@@ -134,15 +131,15 @@ if (args.Length >= 2 && string.Equals(args[0], "summarize-file", StringCompariso
         aiArtifactStore,
         summarizerAgent);
 
-    var record = await summaryService.GetOrCreateSummaryAsync(args[1]);
+    var record = await summaryService.GetOrCreateSummaryAsync(commandArgs[1]);
 
     Console.WriteLine(record.SummaryText);
     Console.WriteLine();
-    Console.WriteLine($"Saved: {aiArtifactStore.GetSummaryPath(args[1])}");
+    Console.WriteLine($"Saved: {aiArtifactStore.GetSummaryPath(commandArgs[1])}");
     return;
 }
 
-if (args.Length >= 1 && string.Equals(args[0], "summarize-all", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 1 && string.Equals(commandArgs[0], "summarize-all", StringComparison.OrdinalIgnoreCase))
 {
     AIAgent summarizerAgent = CreateSummarizerAgent(chatClient);
 
@@ -152,8 +149,8 @@ if (args.Length >= 1 && string.Equals(args[0], "summarize-all", StringComparison
         summarizerAgent);
 
     var directoryPath =
-        args.Length >= 3 && string.Equals(args[1], "--dir", StringComparison.OrdinalIgnoreCase)
-            ? args[2]
+        commandArgs.Length >= 3 && string.Equals(commandArgs[1], "--dir", StringComparison.OrdinalIgnoreCase)
+            ? commandArgs[2]
             : ".";
 
     var listResult = workspaceFileLister.ListFiles(directoryPath);
@@ -205,16 +202,16 @@ if (args.Length >= 1 && string.Equals(args[0], "summarize-all", StringComparison
     return;
 }
 
-if (args.Length >= 2 && string.Equals(args[0], "read-summary", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 2 && string.Equals(commandArgs[0], "read-summary", StringComparison.OrdinalIgnoreCase))
 {
-    var record = await aiArtifactStore.TryLoadSummaryAsync(args[1]);
+    var record = await aiArtifactStore.TryLoadSummaryAsync(commandArgs[1]);
     if (record is null)
     {
         Console.Error.WriteLine("Error: summary file does not exist.");
         return;
     }
 
-    var status = await GetSummaryStatusAsync(aiArtifactStore, args[1]);
+    var status = await GetSummaryStatusAsync(aiArtifactStore, commandArgs[1]);
 
     Console.WriteLine($"SourcePath: {record.SourcePath}");
     Console.WriteLine($"GeneratedAtUtc: {record.GeneratedAtUtc:O}");
@@ -226,9 +223,9 @@ if (args.Length >= 2 && string.Equals(args[0], "read-summary", StringComparison.
     return;
 }
 
-if (args.Length >= 2 && string.Equals(args[0], "approve-plan", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 2 && string.Equals(commandArgs[0], "approve-plan", StringComparison.OrdinalIgnoreCase))
 {
-    var result = await aiArtifactStore.ApprovePlanAsync(args[1]);
+    var result = await aiArtifactStore.ApprovePlanAsync(commandArgs[1]);
 
     Console.WriteLine($"Approved: {result.PlanId}");
     Console.WriteLine($"MovedTo: {result.PlanDirectory}");
@@ -236,11 +233,11 @@ if (args.Length >= 2 && string.Equals(args[0], "approve-plan", StringComparison.
     return;
 }
 
-if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 1 && string.Equals(commandArgs[0], "execute-plan", StringComparison.OrdinalIgnoreCase))
 {
     var isDryRun =
-        args.Length >= 2 &&
-        string.Equals(args[1], "--dry-run", StringComparison.OrdinalIgnoreCase);
+        commandArgs.Length >= 2 &&
+        string.Equals(commandArgs[1], "--dry-run", StringComparison.OrdinalIgnoreCase);
 
     var executionService = new PlanExecutionService(aiArtifactStore, workspaceFileReader);
     var preview = await executionService.GetDryRunPreviewAsync();
@@ -355,7 +352,7 @@ if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.
     return;
 }
 
-if (args.Length >= 1 && string.Equals(args[0], "read-current-plan", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 1 && string.Equals(commandArgs[0], "read-current-plan", StringComparison.OrdinalIgnoreCase))
 {
     var currentPlan = await aiArtifactStore.TryGetCurrentInProgressPlanAsync();
 
@@ -376,9 +373,9 @@ if (args.Length >= 1 && string.Equals(args[0], "read-current-plan", StringCompar
     return;
 }
 
-if (args.Length >= 2 && string.Equals(args[0], "create-plan", StringComparison.OrdinalIgnoreCase))
+if (commandArgs.Length >= 2 && string.Equals(commandArgs[0], "create-plan", StringComparison.OrdinalIgnoreCase))
 {
-    var (directoryPath, instruction) = ParseCreatePlanArguments(args);
+    var (directoryPath, instruction) = ParseCreatePlanArguments(commandArgs);
 
     AIAgent summarizerAgent = CreateSummarizerAgent(chatClient);
     AIAgent plannerAgent = CreatePlannerAgent(chatClient);
@@ -417,8 +414,8 @@ AIAgent agent = chatClient.AsAIAgent(
         AIFunctionFactory.Create(readFileTool.ReadFile)
     ]);
 
-var prompt = args.Length > 0
-    ? string.Join(" ", args)
+var prompt = commandArgs.Length > 0
+    ? string.Join(" ", commandArgs)
     : ReadPrompt();
 
 if (string.IsNullOrWhiteSpace(prompt))
@@ -493,14 +490,14 @@ static AIAgent CreateImplementationAgent(IChatClient chatClient)
     );
 }
 
-static (string DirectoryPath, string Instruction) ParseCreatePlanArguments(string[] args)
+static (string DirectoryPath, string Instruction) ParseCreatePlanArguments(string[] commandArgs)
 {
-    if (args.Length >= 4 && string.Equals(args[1], "--dir", StringComparison.OrdinalIgnoreCase))
+    if (commandArgs.Length >= 4 && string.Equals(commandArgs[1], "--dir", StringComparison.OrdinalIgnoreCase))
     {
-        return (args[2], string.Join(" ", args.Skip(3)));
+        return (commandArgs[2], string.Join(" ", commandArgs.Skip(3)));
     }
 
-    return (".", string.Join(" ", args.Skip(1)));
+    return (".", string.Join(" ", commandArgs.Skip(1)));
 }
 
 static async Task<string> GetSummaryStatusAsync(AiArtifactStore store, string sourcePath)
@@ -519,4 +516,83 @@ static string? ReadPrompt()
 {
     Console.Write("Prompt> ");
     return Console.ReadLine();
+}
+
+static IConfigurationRoot LoadConfiguration(string[] args)
+{
+    var configDirectory = ResolveConfigDirectory(args);
+
+    if (!Directory.Exists(configDirectory))
+    {
+        throw new InvalidOperationException(
+            $"Configuration directory does not exist: {configDirectory}");
+    }
+
+    var appSettingsPath = Path.Combine(configDirectory, "appsettings.json");
+    if (!File.Exists(appSettingsPath))
+    {
+        throw new InvalidOperationException(
+            $"Configuration file does not exist: {appSettingsPath}");
+    }
+
+    return new ConfigurationBuilder()
+        .SetBasePath(configDirectory)
+        .AddJsonFile("appsettings.json", optional: false)
+        .AddJsonFile("appsettings.Local.json", optional: true)
+        .AddEnvironmentVariables(prefix: "LOCALCODINGAGENT_")
+        .Build();
+}
+
+static string ResolveConfigDirectory(string[] args)
+{
+    var optionValue = TryGetGlobalOptionValue(args, "--config-dir");
+    if (!string.IsNullOrWhiteSpace(optionValue))
+    {
+        return Path.GetFullPath(optionValue);
+    }
+
+    var envValue = Environment.GetEnvironmentVariable("LOCALCODINGAGENT_CONFIG_DIR");
+    if (!string.IsNullOrWhiteSpace(envValue))
+    {
+        return Path.GetFullPath(envValue);
+    }
+
+    var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+    if (string.IsNullOrWhiteSpace(home))
+    {
+        throw new InvalidOperationException("Failed to resolve the user home directory.");
+    }
+
+    return Path.Combine(home, "Library", "Application Support", "local-coding-agent");
+}
+
+static string? TryGetGlobalOptionValue(string[] args, string optionName)
+{
+    for (var i = 0; i < args.Length - 1; i++)
+    {
+        if (string.Equals(args[i], optionName, StringComparison.OrdinalIgnoreCase))
+        {
+            return args[i + 1];
+        }
+    }
+
+    return null;
+}
+
+static string[] StripGlobalOptions(string[] args)
+{
+    var result = new List<string>();
+
+    for (var i = 0; i < args.Length; i++)
+    {
+        if (string.Equals(args[i], "--config-dir", StringComparison.OrdinalIgnoreCase))
+        {
+            i++;
+            continue;
+        }
+
+        result.Add(args[i]);
+    }
+
+    return result.ToArray();
 }
