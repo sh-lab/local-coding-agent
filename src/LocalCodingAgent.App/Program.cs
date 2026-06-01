@@ -258,6 +258,7 @@ if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.
 
     Console.WriteLine($"PlanId: {preview.PlanId}");
     Console.WriteLine($"PlanPath: {preview.PlanPath}");
+    Console.WriteLine($"Executable: {preview.CanExecute}");
     Console.WriteLine();
 
     if (!string.IsNullOrWhiteSpace(preview.Goal))
@@ -322,6 +323,22 @@ if (args.Length >= 1 && string.Equals(args[0], "execute-plan", StringComparison.
             Console.WriteLine($"- {item}");
         }
     }
+
+    Console.WriteLine("# Execution Readiness");
+if (preview.CanExecute)
+{
+    Console.WriteLine("This plan is executable in principle.");
+}
+else
+{
+    Console.WriteLine("This plan is NOT executable yet.");
+    Console.WriteLine();
+    Console.WriteLine("Blocking reasons:");
+    foreach (var reason in preview.BlockingReasons)
+    {
+        Console.WriteLine($"- {reason}");
+    }
+}
 
     return;
 }

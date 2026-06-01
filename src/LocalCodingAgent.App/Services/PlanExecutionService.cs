@@ -29,6 +29,7 @@ public sealed class PlanExecutionService
 
         var relevantFiles = ExtractRelevantFiles(sections);
         var reconfirmedTargetFiles = await ReconfirmTargetFilesAsync(relevantFiles, cancellationToken);
+        var blockingReasons = BuildBlockingReasons(relevantFiles, reconfirmedTargetFiles);
 
         return new PlanExecutionPreview
         {
@@ -40,6 +41,8 @@ public sealed class PlanExecutionService
             ProposedMinimalChanges = ExtractNumberedOrBulletedItems(sections, "Proposed Minimal Changes"),
             RisksOrUnknowns = ExtractListItems(sections, "Risks / Unknowns"),
             ApprovalChecklist = ExtractChecklistItems(sections, "User Approval Checklist"),
+            BlockingReasons = blockingReasons,
+            CanExecute = blockingReasons.Count == 0,
             RawPlanMarkdown = currentPlan.PlanMarkdown
         };
     }
@@ -322,5 +325,40 @@ public sealed class PlanExecutionService
         }
 
         return items;
+    }
+
+    private static IReadOnlyList<string> BuildBlockingReasons(
+    IReadOnlyList<string> relevantFiles,
+    IReadOnlyList<PlanTargetFileStatus> reconfirmedTargetFiles)
+    {
+        var reasons = new List<string>();
+
+        if (relevantFiles.Count == 0)
+        {
+            reasons.Add("Relevant Files が空のため、実行対象ファイルを特定できません。");
+            return reasons;
+        }
+
+        foreach (var file in reconfirmedTargetFiles)
+        {
+            if (!file.Exists)
+            {
+                reasons.Add($"対象ファイルが存在しません: {file.SourcePath}");
+                continue;
+            }
+
+            if (!file.Readable)
+            {
+                reasons.Add($"対象ファイルを読み取れません: {file.SourcePath} ({file.Note})");
+                continue;
+            }
+
+            if (!file.SummaryIsCurrent)
+            {
+                reasons.Add($"対象ファイルの summary が最新ではありません: {file.SourcePath}");
+            }
+        }
+
+        return reasons;
     }
 }

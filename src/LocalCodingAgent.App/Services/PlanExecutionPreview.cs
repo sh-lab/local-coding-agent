@@ -10,5 +10,7 @@ public sealed class PlanExecutionPreview
     public IReadOnlyList<string> ProposedMinimalChanges { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> RisksOrUnknowns { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> ApprovalChecklist { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string> BlockingReasons { get; init; } = Array.Empty<string>();
+    public bool CanExecute { get; init; }
     public string RawPlanMarkdown { get; init; } = string.Empty;
 }
